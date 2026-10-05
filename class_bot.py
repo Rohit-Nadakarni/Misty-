@@ -13,11 +13,13 @@ When it messages you:
 Setup: see the chat message. Edit sections 1 and 2 below, leave the rest.
 """
 
+import json
 import logging
 import os
 import random
 import re
 import threading
+import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -65,6 +67,11 @@ TRAVEL_TIME_MIN = 30
 
 # You get the laptop alert this many minutes BEFORE you leave.
 LAPTOP_ALERT_BEFORE_LEAVING_MIN = 10
+
+# ---- Weather & Campus Coordinates (REVA University, Bangalore) --------------
+LATITUDE = 13.1147
+LONGITUDE = 77.6346
+RAIN_THRESHOLD_PCT = 40  # Alert if rain probability exceeds this percentage
 
 # REVA University Timetable (B.Sc - M.St.Cs - I Sem)
 # Format: ("start", "end", "Subject", "Room")  -- 24-hour time.
