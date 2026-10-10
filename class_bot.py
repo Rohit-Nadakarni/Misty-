@@ -67,12 +67,21 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or "PASTE_YOUR_BOT_TOKEN_HERE"
 # Put the key in .env or the host's environment variables. NEVER paste it in this file.
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1").rstrip("/")
-NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
+# NVIDIA retires hosted models from time to time (a retired one answers HTTP 410 "Gone").
+# Misty tries NVIDIA_MODEL first, then the fallbacks in order, and skips any that are gone.
+# See the current list at build.nvidia.com and update these when one is retired.
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b").strip()
+NVIDIA_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv(
+        "NVIDIA_FALLBACK_MODELS",
+        "nvidia/llama-3.3-nemotron-super-49b-v1,nvidia/nemotron-3-nano-30b-a3b",
+    ).split(",") if m.strip()
+]
 # Who the AI says it is
 AI_NAME = "MistyAI"
 AI_MAKER = "Ov.EL labs"
 AI_MAX_TOKENS = 600              # reply length cap
-AI_TEMPERATURE = 0.8             # higher = more chaotic wit
+AI_TEMPERATURE = 1.0             # higher = more chaotic wit (1.0 is what Nemotron 3 recommends)
 AI_HISTORY_TURNS = 8             # how many back-and-forths Misty remembers
 
 # ---- Live timers --------------------------------------------------------------
@@ -1600,19 +1609,45 @@ class AIError(Exception):
     pass
 
 
-def _llm_request(messages: list) -> str:
-    """Blocking. Always call through asyncio.to_thread."""
-    body = json.dumps({
-        "model": NVIDIA_MODEL,
-        "messages": messages,
+class _ModelGone(Exception):
+    """The model id was retired (410) or doesn't exist (404)."""
+
+
+_DEAD_MODELS: set = set()   # model ids that answered 410/404 this run, so we stop trying them
+
+
+def _model_chain() -> list:
+    chain = []
+    for m in [NVIDIA_MODEL] + NVIDIA_FALLBACK_MODELS:
+        if m and m not in chain and m not in _DEAD_MODELS:
+            chain.append(m)
+    return chain
+
+
+def _request_for(model: str, messages: list) -> dict:
+    """Per-model tweaks so every model answers fast, in plain chat mode (no long 'thinking')."""
+    msgs = [dict(m) for m in messages]
+    body = {
+        "model": model,
+        "messages": msgs,
         "temperature": AI_TEMPERATURE,
-        "top_p": 0.9,
+        "top_p": 0.95,
         "max_tokens": AI_MAX_TOKENS,
         "stream": False,
-    }).encode()
+    }
+    low = model.lower()
+    if "nemotron-3" in low:
+        body["chat_template_kwargs"] = {"enable_thinking": False}
+    elif "nemotron-super-49b" in low or "nemotron-ultra" in low:
+        if msgs and msgs[0]["role"] == "system":
+            msgs[0]["content"] = "detailed thinking off\n\n" + msgs[0]["content"]
+    return body
+
+
+def _llm_once(model: str, messages: list) -> str:
     req = urllib.request.Request(
         f"{NVIDIA_BASE_URL}/chat/completions",
-        data=body,
+        data=json.dumps(_request_for(model, messages)).encode(),
         headers={
             "Authorization": f"Bearer {NVIDIA_API_KEY}",
             "Content-Type": "application/json",
@@ -1625,11 +1660,11 @@ def _llm_request(messages: list) -> str:
             data = json.loads(resp.read().decode())
         return (data["choices"][0]["message"]["content"] or "").strip()
     except urllib.error.HTTPError as err:
-        log.warning("LLM HTTP %s", err.code)  # never log headers/key
+        log.warning("LLM HTTP %s from model %s", err.code, model)  # never log headers/key
+        if err.code in (404, 410):
+            raise _ModelGone(model) from err
         if err.code in (401, 403):
             raise AIError("My API key was rejected. Check NVIDIA_API_KEY (or regenerate it).") from err
-        if err.code == 404:
-            raise AIError(f"The model '{NVIDIA_MODEL}' wasn't found. Check NVIDIA_MODEL.") from err
         if err.code == 429:
             raise AIError("Rate-limited by the AI service. Give it a minute, even geniuses need a breather.") from err
         raise AIError(f"The AI service returned an error ({err.code}). Try again shortly.") from err
@@ -1638,6 +1673,22 @@ def _llm_request(messages: list) -> str:
         raise AIError("Couldn't reach the AI service. Network sulking, try again in a bit.") from err
     except (KeyError, IndexError, ValueError) as err:
         raise AIError("The AI service replied with something unreadable.") from err
+
+
+def _llm_request(messages: list) -> str:
+    """Blocking. Always call through asyncio.to_thread. Walks the model chain past retired models."""
+    chain = _model_chain()
+    if not chain:
+        raise AIError("Every model I know has been retired. Set NVIDIA_MODEL to a current one from "
+                      "build.nvidia.com and restart me.")
+    for model in chain:
+        try:
+            return _llm_once(model, messages)
+        except _ModelGone:
+            _DEAD_MODELS.add(model)
+            log.warning("Model %s is retired/unavailable; trying the next one", model)
+    raise AIError("All my configured models have been retired by NVIDIA. Pick a current one at "
+                  "build.nvidia.com, set NVIDIA_MODEL, and restart me.")
 
 
 async def ask_misty(context: ContextTypes.DEFAULT_TYPE, question: str, now: datetime) -> str:
