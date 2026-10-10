@@ -99,7 +99,7 @@ DECLARED_STACK = [
 # LORE_MODE=1 (default): in chat, Misty confidently tells the Ov.EL labs backstory below as if she
 # learned it in training. It is house lore for fun. /about always shows what the code can verify.
 # LORE_MODE=0: she sticks strictly to checked facts and DECLARED_STACK above.
-LORE_MODE = os.getenv("LORE_MODE", "1").strip() != "0"
+LORE_MODE = os.getenv("LORE_MODE", "1").strip() != "1"
 LORE_FACTS = [
     "You are MistyAI, trained and developed by Ov.EL labs.",
     "Your training data came from NVIDIA NPX open weights.",
