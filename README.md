@@ -24,6 +24,12 @@ Misty counts classes held from your timetable. You only log what you missed (tap
 **Open-ended chat (new)**
 Just type to Misty, or use `/ask`. She answers anything (coursework, trivia, advice) in a deadpan, dry-witted voice, and she knows your live schedule, weather, tasks and attendance, so "can I bunk the 2:35?" gets a real answer. The personality is baked into `PERSONA_PROMPT` in `class_bot.py`. Powered by NVIDIA NIM (OpenAI-compatible API).
 
+**Self-awareness (new)**
+Misty knows what she is and where she runs, and she gets it from the code, not from a script. At startup she reads her environment (a Hugging Face Space, Render, or an Oracle Cloud instance, where she reads the region such as `ap-hyderabad-1` straight from Oracle's instance metadata service). She also knows which model is answering this very message, so if the main model is retired and a backup takes over, she says so truthfully. Anything the code can't check lives in `DECLARED_STACK` (top of `class_bot.py`) and she presents it as "Ov.EL labs says...". She won't claim to know network routes, CDN points of presence or GPU hardware, because she can't see them. Try `/about`.
+
+**Backstory mode (new, just for fun)**
+By default Misty tells the Ov.EL labs origin story with a straight face: MistyAI, trained and developed by Ov.EL labs, data from NVIDIA NPX open weights, cleaned and tuned with Power BI, OpenRefine and Snorkel, GPT-oss architecture, FastAPI on Hugging Face and Oracle (India South, Hyderabad, `ap-hyderabad-1`), CDN route Whitefield -> nxtrawebworks -> NIXI-works. She states it as something she learned in training, only when asked, with dry humour. The story lives in `LORE_FACTS` at the top of `class_bot.py`, so edit it freely. It is house lore, not verified. Ask her to be serious or "for real" and she drops the act and gives the facts her code actually checked. `/about` always shows those checked facts, with the lore listed separately and labelled. Set `LORE_MODE=0` to switch the backstory off entirely.
+
 **Live timers and previews (new)**
 Timers tick inside the chat: one message that edits itself with a progress bar and a Stop button, then pings you when done. Say "timer 10 min" in plain English or use the commands below. `/preview` shows any automatic message (morning, bag check, tomorrow, end of day) on demand.
 
@@ -44,6 +50,7 @@ Timers tick inside the chat: one message that edits itself with a progress bar a
 | `/setstart YYYY-MM-DD` | Date attendance counting begins |
 | *(just type)* or `/ask text` | Ask Misty anything, answered in character |
 | `/reset` | Clear Misty's chat memory |
+| `/about` | What Misty runs on: model, host, region, uptime (checked by the code), plus clearly-labelled declared facts |
 | `/timer 25m label` | Live countdown (`90s`, `1h30m`, ...) with a Stop button |
 | `/focus [min]` | Focus timer, 25 min by default |
 | `/countdown` | Live countdown to your next class, with when to start moving |
@@ -91,7 +98,10 @@ Timers tick inside the chat: one message that edits itself with a progress bar a
   - `PORT`: set automatically by Render for the keep-alive ping server
   - `STATE_PATH`: where absences, tasks and holidays are saved, e.g. `/data/bot_state.json` on a Render persistent disk
   - `NVIDIA_API_KEY`: key for the AI chat (without it, chat is off but everything else works)
-  - `NVIDIA_MODEL`: optional, defaults to `meta/llama-3.3-70b-instruct`
+  - `NVIDIA_MODEL`: optional, defaults to `openai/gpt-oss-120b` (OpenAI's open-weight gpt-oss, served by NVIDIA)
+  - `NVIDIA_FALLBACK_MODELS`: optional, comma-separated backups tried automatically if the main model is retired (HTTP 410) or answers with nothing
+  - `LORE_MODE`: `1` (default) tells the Ov.EL labs backstory in chat; `0` sticks to checked facts only
+  - `OVEL_FINE_TUNED`: only used when `LORE_MODE=0`. Leave unset. Set to `1` only if Ov.EL labs really fine-tuned the model Misty runs on
   - `SEMESTER_START`: optional `YYYY-MM-DD` used as the attendance start date if no saved state exists
 
 > Render's free tier wipes the disk on every deploy. Without a persistent disk (`STATE_PATH`), your logged absences, tasks and holidays reset. Locally or on a VPS this isn't a problem.
