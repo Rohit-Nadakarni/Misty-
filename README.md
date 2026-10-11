@@ -34,7 +34,11 @@ By default Misty tells the Ov.EL labs origin story with a straight face: MistyAI
 Just tell Misty in plain English and she uses her tools: *"add a task: FSD record by friday"*, *"remind me about the viva tomorrow at 2:30pm in Lab 3"*, *"10 min timer for revision"*, *"what's on tomorrow?"*, *"will it rain on my way home?"*, *"look up the latest GATE dates"*. Tools: tasks, one-off events with reminders (`/events`), timers, your schedule and attendance, weather, holiday and absence logging, web search and a page reader.
 - **Risky actions need a tap.** Logging an absence, marking a holiday, completing a task or deleting an event shows a confirm button, and nothing changes until you press it.
 - **Web content is treated as untrusted.** Once she has read a web page or search result in a conversation, even adding a task needs a confirm tap, so a malicious page can't quietly make her act. She also refuses to open private or internal addresses.
-- **Internet access** needs one key: `TAVILY_API_KEY` (free tier, about 1,000 searches a month, no card, from tavily.com). Brave works too (`BRAVE_API_KEY`, but its free tier is gone for new users). Google's own Custom Search API is closed to new customers, so it isn't an option. Without a key she can still open links you paste.
+- **Internet access** needs one key: `TAVILY_API_KEY` (free tier, about 1,000 credits a month, no card, from tavily.com). Brave works too (`BRAVE_API_KEY`, but its free tier is gone for new users). Google's own Custom Search API is closed to new customers, so it isn't an option. Without a key she can still open links you paste.
+  - **She searches first for anything that changes** (news, scores, prices, exam dates, "latest", "today") instead of answering from memory, and never searches questions about herself.
+  - Searches use Tavily's `news` topic for headlines, can be limited to the last day, week, month or year, and come back with a short summary plus dated sources. `TAVILY_COUNTRY=india` boosts Indian results for general searches.
+  - **The page reader falls back to Tavily Extract** when a site blocks a plain download or is an empty JavaScript page. Private and internal addresses are refused first and never passed on.
+  - **Credit-friendly:** the same search within 10 minutes is served from memory, and a soft monthly cap (`SEARCH_MONTHLY_CAP`, default 900) stops her before the free tier runs out. `/about` shows the count.
 - Your permanent timetable is still edited in `class_bot.py`. Chat adds one-off events, tasks, holidays and absences on top of it.
 - `AGENT_TOOLS=0` switches all of this off.
 
@@ -88,8 +92,10 @@ Timers tick inside the chat: one message that edits itself with a progress bar a
    ```env
    BOT_TOKEN=your_telegram_bot_token_here
    NVIDIA_API_KEY=your_nvidia_nim_key_here
+   GOOGLE_WEATHER_API_KEY=your_google_weather_key_here
+   TAVILY_API_KEY=your_tavily_key_here
    ```
-   Get the NVIDIA key at [build.nvidia.com](https://build.nvidia.com). Never commit `.env` or paste keys into the code.
+   Get the NVIDIA key at [build.nvidia.com](https://build.nvidia.com). Never commit `.env` or paste keys into the code or into `env.example`.
 4. **Run the bot:**
    ```bash
    python3 class_bot.py
@@ -108,8 +114,8 @@ Timers tick inside the chat: one message that edits itself with a progress bar a
   - `STATE_PATH`: where absences, tasks and holidays are saved, e.g. `/data/bot_state.json` on a Render persistent disk
   - `NVIDIA_API_KEY`: key for the AI chat (without it, chat is off but everything else works)
   - `GOOGLE_WEATHER_API_KEY`: a free Maps Demo Key works (no billing)
-  - `WEATHER_DAILY_CAP` (default 90), `WEATHER_RESERVE` (20), `WEATHER_REFRESH_MIN` (45), `WEATHER_MONTHLY_CAP` (9000): the call budget. Defaults suit the 100-calls-a-day demo key
-  - `TAVILY_API_KEY` (or `BRAVE_API_KEY`): turns on web search
+  - `WEATHER_DAILY_CAP` (default 90), `WEATHER_RESERVE` (20), `WEATHER_REFRESH_MIN` (60), `WEATHER_MONTHLY_CAP` (9000): the call budget. Defaults suit the 100-calls-a-day demo key
+  - `TAVILY_API_KEY` (or `BRAVE_API_KEY`): turns on web search. Optional: `TAVILY_COUNTRY` (e.g. `india`), `SEARCH_MONTHLY_CAP` (900)
   - `AGENT_TOOLS`: `0` disables tools
   - `NVIDIA_MODEL`: optional, defaults to `openai/gpt-oss-120b` (OpenAI's open-weight gpt-oss, served by NVIDIA)
   - `NVIDIA_FALLBACK_MODELS`: optional, comma-separated backups tried automatically if the main model is retired (HTTP 410) or answers with nothing
@@ -129,13 +135,14 @@ Timers tick inside the chat: one message that edits itself with a progress bar a
 1. Get a key from [Maps Demo Key](https://developers.google.com/maps/demo-key) (sign in with a Google account).
 2. Set `GOOGLE_WEATHER_API_KEY` in `.env` or your host's environment.
 
-The demo key allows **100 calls a day** per API (Google says these limits can change, and the key is meant for development and testing). Misty is built to stay far under that:
-- **One call per refresh.** Current conditions are read from the hourly forecast, which starts at the current hour.
-- **Refreshes only when useful:** every 45 minutes in the background, only between 5 AM and 11 PM, and only when today or tomorrow has classes. A no-class Saturday costs about 1 call.
-- **On-demand requests** (`/weather`, `/today`, `/tomorrow`, `/preview`, asking Misty) refresh if the forecast is older than 15 minutes, so spamming them doesn't burn calls.
-- **A rolling 24-hour budget** (`WEATHER_DAILY_CAP`, default 90) that can never be exceeded. Background refreshes stop 20 calls short (`WEATHER_RESERVE`) so your own requests always have room. When the budget is used up she shows the last forecast with a "forecast is X old" note.
-- Failures back off (10 min, 20, 40... up to 2 h), and a rejected page size is remembered so it doesn't waste calls.
+The demo key allows **100 calls a day** per API (Google says these limits can change, and the key is meant for development and testing). Misty spends calls only where a message needs them:
+- **Only the hours she needs.** She asks Google for just the hours her messages use (usually the rest of today, about 16 on a class morning) instead of the default 240. Google's page size tops out at 24 hours, so up to 24 hours is **one call**. Only a look-ahead past 24 hours (for example `/tomorrow` in the morning) costs two.
+- **Just-in-time refreshes, not a timer.** The background job calls Google only in the 10 minutes before an automatic message that quotes the forecast: morning briefing, bag check, end of day and the 9 PM tomorrow preview. A normal class day costs about **4 calls**, a no-class day 0.
+- **Restarts are free.** The forecast is saved in the state file, so a redeploy or crash doesn't trigger a refresh.
+- **On-demand requests** (`/weather`, `/today`, `/tomorrow`, `/preview`, her weather tool) refresh if the forecast is older than 15 minutes, or if it doesn't reach far enough (`/tomorrow` right after `/weather` fetches tomorrow's hours). Chatting with her refreshes it only when it's older than 90 minutes.
+- **A rolling 24-hour budget** (`WEATHER_DAILY_CAP`, default 90) that can never be exceeded. Background refreshes stop 20 calls short of it (`WEATHER_RESERVE`) so your own requests always have room. When the budget is used up she shows the last forecast with a "forecast is X old" note.
+- **Failures** retry after 2, 4, 8 minutes... up to 30, and a half-failed two-page fetch keeps the page it got. Responses are requested gzip-compressed.
 
-Measured in simulation: about 25 calls on a normal class day, about 51 in the worst case where Google forces two pages per refresh, and 90 at most even if you request `/weather` every 16 minutes all day. `/about` shows the calls used in the last 24 hours.
+Measured in a day-long simulation against a mock of Google's API (page size capped at 24): 4 calls on a normal class day, down from roughly 25 to 51 before. `/about` shows the calls used in the last 24 hours.
 
 **With a standard billed key** you get 10,000 free calls a month (then $0.15 per 1,000), so raise `WEATHER_DAILY_CAP`. If the key is missing or Google rejects it, `/weather` says exactly why.
